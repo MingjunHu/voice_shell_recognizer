@@ -13,6 +13,7 @@ diyvoice/llmanswer/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+test_tool.ipynb
 
 # 虚拟环境
 venv/
