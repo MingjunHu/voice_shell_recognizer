@@ -18,15 +18,33 @@ from faster_whisper import WhisperModel
 from openai import OpenAI
 import logging
 
+# 目录设置
+TEMP_DIR = "temp_audio"
+os.makedirs(TEMP_DIR, exist_ok=True)
+
 # 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("shell_service.log"),
-        logging.StreamHandler()
-    ]
-)
+try:
+    # 使用临时目录中的日志文件
+    log_file = os.path.join(TEMP_DIR, "shell_service.log")
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+except Exception as e:
+    # 如果无法创建文件处理器，则只使用控制台输出
+    print(f"无法配置日志文件: {str(e)}")
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()
+        ]
+    )
 logger = logging.getLogger("ShellService")
 
 # 音频参数
@@ -37,10 +55,6 @@ RATE = 16000
 SILENCE_THRESHOLD = 1000  # 静音阈值
 SILENCE_DURATION = 2  # 静音持续时间（秒）
 MAX_RECORD_DURATION = 20  # 最大录音时间（秒）
-
-# 目录设置
-TEMP_DIR = "temp_audio"
-os.makedirs(TEMP_DIR, exist_ok=True)
 
 # 加载 Whisper 模型
 logger.info("正在加载语音识别模型...")
