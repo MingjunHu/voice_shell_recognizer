@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>智能语音识别</title>
+</head>
+<body>
+  <h2>🎙️ 正在和你对话...</h2>
+  <p>只在你说话时录音，自动上传到后台识别</p>
+  <div id="results" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; min-height: 100px;"></div>
+
+  <script>
+    let audioContext;
+    let analyser;
+    let mediaRecorder;
+    let chunks = [];
+
+    let isRecording = false;
+    let silenceStartTime = null;
+    let recordStartTime = null;
+    let currentAudio = null; // 当前播放的音频对象
+    let currentAudioPath = null; // 当前播放的音频文件路径
+
+    const VOLUME_THRESHOLD = 0.05;
+    const MAX_RECORD_TIME = 20000;
+    const SILENCE_TIMEOUT = 2000;
+
+    async function startMonitoring() {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => chunks.push(e.data);
+
+      mediaRecorder.onstop = async () => {
+        if (chunks.length === 0) return;
+        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('file', blob, 'recording.webm');
+
+        console.log("⏫ 上传音频中...");
+        const res = await fetch('/diyvoice/upload-audio/', {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+        const resultsDiv = document.getElementById('results');
+        const newResult = document.createElement('div');
+        newResult.textContent = data.text;
+        //显示在最下面
+        newResult.style.border = "1px solid #ccc";
+        newResult.style.padding = "5px";
+        newResult.style.marginTop = "5px";
+        newResult.style.backgroundColor = "#f9f9f9";
+        newResult.style.borderRadius = "5px";
+        resultsDiv.appendChild(newResult);
+        
+        // 调用TTS接口生成并播放音频
+        try {
+            const ttsRes = await fetch('/diyvoice/generate-tts/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({text: data.text})
+            });
+            
+            if (ttsRes.ok) {
+                const result = await ttsRes.json();
+                if (result.status === 'success') {
+                    console.log('Audio file path:', result.file_path);
+                    // 停止当前播放的音频(如果有)
+                    if (currentAudio) {
+                        currentAudio.pause();
+                        currentAudio.currentTime = 0;
+                    }
+                    
+                    currentAudio = new Audio(result.file_path);
+                    currentAudioPath = result.file_path; // 保存当前播放文件路径
+                    
+                    currentAudio.oncanplaythrough = () => {
+                        console.log('Audio ready to play');
+                        currentAudio.play().catch(e => {
+                            console.error('Play failed:', e);
+                        });
+                    };
+                    
+                    currentAudio.onerror = (e) => {
+                        console.error('Audio error:', e);
+                    };
+                    currentAudio.onended = async () => {
+                        console.log('Audio playback finished, deleting file');
+                        try {
+                            const deleteRes = await fetch('/diyvoice/delete-audio/', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({file_path: result.file_path})
+                            });
+                            const deleteData = await deleteRes.json();
+                            if (deleteData.status === 'success') {
+                                console.log('Audio file deleted successfully');
+                            } else {
+                                console.error('Failed to delete audio file:', deleteData.message);
+                            }
+                        } catch (e) {
+                            console.error('Delete request error:', e);
+                        }
+                    };
+                } else {
+                    console.error('TTS generation failed');
+                }
+            } else {
+                console.error('TTS request failed:', ttsRes.status);
+            }
+        } catch (e) {
+            console.error('TTS request error:', e);
+        }
+        
+        chunks = [];
+      };
+
+      setInterval(monitorVolume, 200);
+    }
+
+    function getVolume() {
+      const dataArray = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(dataArray);
+      let sumSquares = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const value = (dataArray[i] - 128) / 128;
+        sumSquares += value * value;
+      }
+      return Math.sqrt(sumSquares / dataArray.length);
+    }
+
+    function monitorVolume() {
+      const volume = getVolume();
+
+      if (volume > VOLUME_THRESHOLD) {
+        // 如果正在播放音频且检测到用户声音，停止播放
+        if (currentAudio) {
+          console.log("🎤 检测到用户声音，停止当前播放");
+          const fileToDelete = currentAudioPath;
+          currentAudio.pause();
+          currentAudio.currentTime = 0; // 重置播放位置
+          currentAudio = null;
+          currentAudioPath = null;
+          
+          // 删除被中断的音频文件
+          if (fileToDelete) {
+              fetch('/diyvoice/delete-audio/', {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({file_path: fileToDelete})
+              })
+              .then(res => res.json())
+              .then(data => {
+                  if (data.status === 'success') {
+                      console.log('中断的音频文件已删除:', fileToDelete);
+                  } else {
+                      console.error('删除中断音频失败:', data.message);
+                  }
+              })
+              .catch(e => console.error('删除请求错误:', e));
+          }
+          
+          console.log("已停止播放");
+        }
+        
+        if (!isRecording) {
+          console.log("🎤 开始录音...");
+          mediaRecorder.start();
+          recordStartTime = Date.now();
+          isRecording = true;
+        }
+        silenceStartTime = null;
+      }
+
+      if (isRecording) {
+        if (volume <= VOLUME_THRESHOLD) {
+          if (!silenceStartTime) silenceStartTime = Date.now();
+          else if (Date.now() - silenceStartTime >= SILENCE_TIMEOUT) {
+            console.log("🛑 静音超过 2 秒，停止录音");
+            mediaRecorder.stop();
+            isRecording = false;
+          }
+        }
+
+        if (Date.now() - recordStartTime >= MAX_RECORD_TIME) {
+          console.log("⏱️ 达到最长录音时间，停止录音");
+          mediaRecorder.stop();
+          isRecording = false;
+        }
+      }
+    }
+
+    startMonitoring();
+  </script>
+</body>
+</html>

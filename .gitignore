@@ -1,0 +1,28 @@
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 日志文件
+*.log
+
+# 临时音频文件
+temp_audio/
+uploads/
+diyvoice/llmanswer/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# 音频文件
+*.wav
+*.mp3
+
+# 系统文件
+.DS_Store
+Thumbs.db
